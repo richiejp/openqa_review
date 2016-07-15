@@ -102,8 +102,9 @@ import os.path
 import re
 import sys
 from collections import defaultdict
+from configparser import ConfigParser  # isort:skip can not make isort happy here
 from string import Template
-from urllib.parse import quote, unquote, urljoin
+from urllib.parse import quote, unquote, urljoin, quote_plus, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -180,6 +181,21 @@ class Browser(object):
         return content
 
 
+CONFIG_PATH = os.path.expanduser('~') + '/.openqa_reviewrc'
+CONFIG_USAGE = """
+You are missing the mandatory configuration file with the proper format.
+Example:
+[product_issues]
+system = bugzilla
+# if username and password are not defined here, they will be stored in your
+# local keyring if found
+#username = user
+#password = secret
+# username and password can be referenced with '{username}' and '{password}'
+query_url = https://{username}:{password}@apibugzilla.novell.com/buglist.cgi?quicksearch=
+"""
+
+
 openqa_review_report_product_template = Template("""
 **Date:** $now
 **Build:** $build
@@ -228,6 +244,16 @@ def filename_to_url(name):
     'http://openqa.opensuse.org/tests/foo/3'
     """
     return unquote(name.replace(':', '/'))
+
+
+def issue_tracker_query_url(query_url, search_term):
+    """
+    Combine issue tracker query URL and search term.
+
+    >>> str(issue_tracker_query_url('https://bugzilla.suse.com/buglist.cgi?quicksearch=', 'https://openqa.suse.de/tests/180243'))
+    'https://bugzilla.suse.com/buglist.cgi?quicksearch="https%3A%2F%2Fopenqa.suse.de%2Ftests%2F180243"'
+    """
+    return query_url + '"%s"' % quote_plus(search_term)
 
 
 def parse_summary(details):
@@ -414,6 +440,21 @@ def get_results_by_bugref(results, args):
     return results_by_bugref
 
 
+def retrieve_issues(browser, url, issue_system=''):
+    # how to find issues/bugs on each issue trackers result pages
+    issue_class = {
+        'bugzilla': re.compile('bz_bugitem'),
+    }
+    log.debug("Querying issues using {url} ({issue_system})".format(url=url, issue_system=issue_system))
+    soup = browser.get_soup(url)
+    root_url = '{u.scheme}://{u.hostname}'.format(u=urlparse(url))
+    issues = [issue for issue in soup.find_all(class_=issue_class[issue_system])]
+    for i in issues:
+        log.debug("Found issue {}".format(i.text))
+    issue_urls = [absolute_url(root_url, issue.find('a')) for issue in issues]
+    return issue_urls
+
+
 def generate_arch_report(arch, results, root_url, args):
     verbose_test = args.verbose_test
     show_empty = args.show_empty
@@ -593,6 +634,25 @@ def generate_product_report(browser, job_group_url, root_url, args=None):
         log.info("%s missing completely from current run: %s" %
                  (pluralize(len(missing_archs), "architecture is", "architectures are"), ', '.join(missing_archs)))
     arch_state_results = SortedDict({arch: get_arch_state_results(arch, current_details, previous_details, output_state_results) for arch in archs})
+    if args.retrieve_issues:
+        config = ConfigParser(interpolation=None)
+        config_entries = config.read(CONFIG_PATH)
+        if not config_entries:  # pragma: no cover
+            print("Need configuration file '{}' for issue retrieval credentials".format(CONFIG_PATH))
+            print(CONFIG_USAGE)
+            sys.exit(1)
+
+        def all_issues(config):
+            # TODO check if username and password are replaced, if not ask "python-keyring" or fail
+            query_url = config['query_url'].format(**config)
+            search_url = issue_tracker_query_url(query_url, urljoin(root_url, 'tests/'))
+            issues = retrieve_issues(browser, search_url, config['system'])
+            return issues
+        product_issues = all_issues(config['product_issues'])
+        test_issues = all_issues(config['test_issues'])
+        for arch, result in iteritems(arch_state_results):
+            for test, test_result in iteritems(result):
+                test_result.update({'product_issues': retrieve_issues(browser, url, product_config['system'])})
     now_str = datetime.datetime.now().strftime('%Y-%m-%d - %H:%M')
     missing_archs_str = ' * **Missing architectures**: %s' % ', '.join(missing_archs) if missing_archs else ''
     openqa_review_report_product = openqa_review_report_product_template.substitute({
@@ -662,6 +722,11 @@ def parse_args():
                               help="""Parse \'bugrefs\' from test results comments and triage issues accordingly.
                               See https://progress.opensuse.org/projects/openqav3/wiki/Wiki#Show-bug-or-label-icon-on-overview-if-labeled-gh550
                               for details about bugrefs in openQA""")
+    parser.add_argument('--retrieve-issues', action='store_true',
+                        help="""Try to retrieve product and test issues from issue tracker. Needs configuration
+                        file {} with credentials, see '--retrieve-issues-help'.""".format(CONFIG_PATH))
+    parser.add_argument('--retrieve-issues-help', action='store_true',
+                        help="""Shows help how to setup '--retrieve-issues' configuration file.""")
     parser.add_argument('--query-issue-status', action='store_true',
                         help='Query issue trackers for the issues found and report on their status and assignee. Needs option "-r/--bugrefs"')
     parser.add_argument('-a', '--arch',
@@ -678,7 +743,12 @@ def parse_args():
                         they should already carry bug references by other
                         means anyway.""")
     add_load_save_args(parser)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.retrieve_issues_help:
+        print(CONFIG_USAGE)
+        print("Expected file path: {}".format(CONFIG_PATH))
+        sys.exit(0)
+    return args
 
 
 def get_job_groups(browser, root_url, args):
