@@ -191,8 +191,6 @@ system = bugzilla
 # local keyring if found
 #username = user
 #password = secret
-# username and password can be referenced with '{username}' and '{password}'
-query_url = https://{username}:{password}@apibugzilla.novell.com/buglist.cgi?quicksearch=
 """
 
 
@@ -244,16 +242,6 @@ def filename_to_url(name):
     'http://openqa.opensuse.org/tests/foo/3'
     """
     return unquote(name.replace(':', '/'))
-
-
-def issue_tracker_query_url(query_url, search_term):
-    """
-    Combine issue tracker query URL and search term.
-
-    >>> str(issue_tracker_query_url('https://bugzilla.suse.com/buglist.cgi?quicksearch=', 'https://openqa.suse.de/tests/180243'))
-    'https://bugzilla.suse.com/buglist.cgi?quicksearch="https%3A%2F%2Fopenqa.suse.de%2Ftests%2F180243"'
-    """
-    return query_url + '"%s"' % quote_plus(search_term)
 
 
 def parse_summary(details):
@@ -372,6 +360,7 @@ def all_failures_one_bug(result_list, args, query_issue_status=False):
     if query_issue_status:
         b = Browser(args, '')
         try:
+            # TODO extend here based on what is working for redmine also for bugzilla, see config section for bugzilla credentials
             issue_json = b.get_json(result_list[0]['bugref_href'] + '.json')['issue']
         except DownloadError as e:  # pragma: no cover
             return line + ' ' + str(e) + '\n'
@@ -440,21 +429,6 @@ def get_results_by_bugref(results, args):
     return results_by_bugref
 
 
-def retrieve_issues(browser, url, issue_system=''):
-    # how to find issues/bugs on each issue trackers result pages
-    issue_class = {
-        'bugzilla': re.compile('bz_bugitem'),
-    }
-    log.debug("Querying issues using {url} ({issue_system})".format(url=url, issue_system=issue_system))
-    soup = browser.get_soup(url)
-    root_url = '{u.scheme}://{u.hostname}'.format(u=urlparse(url))
-    issues = [issue for issue in soup.find_all(class_=issue_class[issue_system])]
-    for i in issues:
-        log.debug("Found issue {}".format(i.text))
-    issue_urls = [absolute_url(root_url, issue.find('a')) for issue in issues]
-    return issue_urls
-
-
 def generate_arch_report(arch, results, root_url, args):
     verbose_test = args.verbose_test
     show_empty = args.show_empty
@@ -477,7 +451,7 @@ def generate_arch_report(arch, results, root_url, args):
         if not re.match('(poo|bsc)#', bugref):
             continue
         # if any result was still failing the issue is regarded as existing
-        query_issue_status = args.query_issue_status and re.match('poo#', bugref)
+        query_issue_status = args.query_issue_status and re.match('(poo|bsc)#', bugref)
         issues[issue_state(result_list)][issue_type(bugref)] += all_failures_one_bug(result_list, args, query_issue_status)
 
     # left do handle are the issues marked with 'TODO'
@@ -642,17 +616,10 @@ def generate_product_report(browser, job_group_url, root_url, args=None):
             print(CONFIG_USAGE)
             sys.exit(1)
 
-        def all_issues(config):
-            # TODO check if username and password are replaced, if not ask "python-keyring" or fail
-            query_url = config['query_url'].format(**config)
-            search_url = issue_tracker_query_url(query_url, urljoin(root_url, 'tests/'))
-            issues = retrieve_issues(browser, search_url, config['system'])
-            return issues
-        product_issues = all_issues(config['product_issues'])
-        test_issues = all_issues(config['test_issues'])
-        for arch, result in iteritems(arch_state_results):
-            for test, test_result in iteritems(result):
-                test_result.update({'product_issues': retrieve_issues(browser, url, product_config['system'])})
+    #    product_issues = all_issues(config['product_issues'])
+    #    for arch, result in iteritems(arch_state_results):
+    #        for test, test_result in iteritems(result):
+    #            test_result.update({'product_issues': retrieve_issues(browser, url, product_config['system'])})
     now_str = datetime.datetime.now().strftime('%Y-%m-%d - %H:%M')
     missing_archs_str = ' * **Missing architectures**: %s' % ', '.join(missing_archs) if missing_archs else ''
     openqa_review_report_product = openqa_review_report_product_template.substitute({
