@@ -345,10 +345,10 @@ def get_results_by_bugref(results, args):
 
 def set_status_badge(states):
     # TODO pretty arbitrary
-    if states.count('NEW_ISSUE') == 0 and states.count('STILL_FAILING') <= 1:
+    if states.count('NEW_ISSUE') == 0 and states.count('STILL_FAILING') <= 5:
         return 'GREEN'
     # still failing and soft issues allowed; TODO also arbitrary, just adjusted to test set
-    elif states.count('NEW_ISSUE') == 0 and states.count('STILL_FAILING') <= 5:
+    elif states.count('NEW_ISSUE') <= 1 and states.count('STILL_FAILING') <= 7:
         return 'AMBER'
     else:
         return 'RED'
@@ -731,8 +731,8 @@ class ArchReport(object):
             'status_badge': status_badge_str[self.status_badge],
             # everything that is 'NEW_ISSUE' should be product issue but if tests have changed content, then probably openqa issues
             # For now we can just not easily decide unless we use the 'bugrefs' mode
-            'new_openqa_issues': issue_listing('**New openQA-issues:**', self.issues['new']['openqa'], self.args.show_empty),
-            'existing_openqa_issues': issue_listing('**Existing openQA-issues:**', self.issues['existing']['openqa'], self.args.show_empty),
+            'new_openqa_issues': issue_listing('**New testsuite-issues:**', self.issues['new']['openqa'], self.args.show_empty),
+            'existing_openqa_issues': issue_listing('**Existing testsuite-issues:**', self.issues['existing']['openqa'], self.args.show_empty),
             'new_product_issues': issue_listing('**New Product bugs:**', self.issues['new']['product'], self.args.show_empty),
             'existing_product_issues': issue_listing('**Existing Product bugs:**', self.issues['existing']['product'], self.args.show_empty),
             'todo_issues': todo_issues if (self.issues['new']['todo'] or self.issues['existing']['todo']) else '',
