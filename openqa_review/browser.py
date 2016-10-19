@@ -47,7 +47,7 @@ class Browser(object):
 
     """download relative or absolute url and return soup."""
 
-    def __init__(self, args, root_url):
+    def __init__(self, args, root_url, user='', passwd=''):
         """Construct a browser object with options."""
         self.save = args.save if hasattr(args, 'save') else False
         self.load = args.load if hasattr(args, 'load') else False
@@ -55,6 +55,8 @@ class Browser(object):
         self.save_dir = args.save_dir if hasattr(args, 'save_dir') else '.'
         self.root_url = root_url
         self.cache = {}
+        self.user = user
+        self.password = passwd
 
     def get_soup(self, url):
         """Return content from URL as 'BeautifulSoup' output."""
@@ -81,7 +83,10 @@ class Browser(object):
             content = json.loads(raw) if as_json else raw
         else:  # pragma: no cover
             absolute_url = url if not url.startswith('/') else urljoin(self.root_url, str(url))
-            r = requests.get(absolute_url)
+            if self.user != '':
+                r = requests.get(absolute_url, auth=(self.user, self.password))
+            else:
+                r = requests.get(absolute_url)
             if r.status_code != 200:
                 msg = "Request to %s was not successful, status code: %s" % (absolute_url, r.status_code)
                 log.info(msg)

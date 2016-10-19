@@ -101,6 +101,7 @@ import logging
 import os.path
 import re
 import sys
+import getpass
 from collections import defaultdict, OrderedDict
 from configparser import ConfigParser, NoSectionError, NoOptionError  # isort:skip can not make isort happy here
 from string import Template
@@ -282,10 +283,13 @@ def progress_browser_factory(args):
 
 
 def bugzilla_browser_factory(args):
-    b = Browser(args, config.get('product_issues', 'base_url') % {
-        "username": config.get('product_issues', 'username'),
-        "password": config.get('product_issues', 'password'),
-    })
+    user = config.get('product_issues', 'username')
+    password = ''
+    if config.has_option('product_issues', 'password'):
+        password = config.get('product_issues', 'password')
+    else:
+        password = getpass.getpass()
+    b = Browser(args, config.get('product_issues', 'base_url'), user, password)
     return b
 
 
